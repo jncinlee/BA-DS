@@ -1,0 +1,168 @@
+#15'1103 piolet test on NN
+
+#####
+#http://www.r-bloggers.com/fitting-a-neural-network-in-r-neuralnet-package/
+#####
+
+#use neuro network/logistic regression/SVM
+library("foreign")
+setwd("C:/Users/user/Downloads")
+data1<-read.table("BADS_SWT_Trainingset.csv", sep = ',',header=T)
+
+
+#####NN
+#####
+
+#check for missing
+mis<-apply(data,2,function(x) sum(is.na(x)))
+##quiet many...
+mis
+#names(data[mis==0])
+
+#mark the missing attrib dont use, data1 no NA
+data<-data1[mis==0] #cant get...
+#data<-na.omit(data1, by=col) #example delete don't work
+
+#find sample and divide to train test set, fit a glm first to see MSE
+index <- sample(1:nrow(data),round(0.75*nrow(data)))
+train <- data[index,]
+test <- data[-index,]
+lm.fit <- glm(churn~., data=train) #take so long...124-ID
+summary(lm.fit)
+pr.lm <- predict(lm.fit,test)
+MSE.lm <- sum((pr.lm - test$churn)^2)/nrow(test)
+
+#normalize b4 NN
+maxs <- apply(data, 2, max) 
+mins <- apply(data, 2, min)
+
+scaled <- as.data.frame(scale(data, center = mins, scale = maxs - mins))
+
+train_ <- scaled[index,]
+test_ <- scaled[-index,]
+
+#find the appor node for NN, usual 2/3 input variable (80 now)
+library(neuralnet)
+n <- names(train_)
+f <- as.formula(paste("churn ~", paste(n[!n %in% "churn"], collapse = " + ")))
+nn <- neuralnet(f,data=train_,hidden=c(5,3),linear.output=T)
+
+#can plot
+plot(nn)
+
+#prediction on churn
+pr.nn <- compute(nn,test_[,1:13])
+
+pr.nn_ <- pr.nn$net.result*(max(data$churn)-min(data$churn))+min(data$churn)
+test.r <- (test_$churn)*(max(data$churn)-min(data$churn))+min(data$churn)
+
+MSE.nn <- sum((test.r - pr.nn_)^2)/nrow(test_)
+
+#we then compare the two MSEs
+print(paste(MSE.lm,MSE.nn))
+
+#para plot for two
+par(mfrow=c(1,2))
+
+plot(test$churn,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='NN',pch=18,col='red', bty='n')
+
+plot(test$churn,pr.lm,col='blue',main='Real vs predicted lm',pch=18, cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='LM',pch=18,col='blue', bty='n', cex=.95)
+
+#same plot for two
+plot(test$churn,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+points(test$churn,pr.lm,col='blue',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend=c('NN','LM'),pch=18,col=c('red','blue'))
+
+#cross validate
+library(boot)
+set.seed(200)
+lm.fit <- glm(medv~.,data=data)
+cv.glm(data,lm.fit,K=10)$delta[1]
+
+set.seed(450)
+cv.error <- NULL
+k <- 10
+
+library(plyr) 
+pbar <- create_progress_bar('text')
+pbar$init(k)
+
+for(i in 1:k){
+  index <- sample(1:nrow(data),round(0.9*nrow(data)))
+  train.cv <- scaled[index,]
+  test.cv <- scaled[-index,]
+  
+  nn <- neuralnet(f,data=train.cv,hidden=c(5,2),linear.output=T)
+  
+  pr.nn <- compute(nn,test.cv[,1:13])
+  pr.nn <- pr.nn$net.result*(max(data$medv)-min(data$medv))+min(data$medv)
+  
+  test.cv.r <- (test.cv$medv)*(max(data$medv)-min(data$medv))+min(data$medv)
+  
+  cv.error[i] <- sum((test.cv.r - pr.nn)^2)/nrow(test.cv)
+  
+  pbar$step()
+}
+
+mean(cv.error)
+cv.error
+boxplot(cv.error,xlab='MSE CV',col='cyan',
+        border='blue',names='CV error (MSE)',
+        main='CV error (MSE) for NN',horizontal=TRUE)
+
+
+#####logistic
+#####
+
+#####
+#http://www.r-bloggers.com/how-to-perform-a-logistic-regression-in-r/
+#####
+
+#checking missing
+training.data.raw <- read.csv('train.csv',header=T,na.strings=c(""))
+sapply(training.data.raw,function(x) sum(is.na(x)))
+sapply(training.data.raw, function(x) length(unique(x)))
+library(Amelia)
+missmap(training.data.raw, main = "Missing values vs observed")
+
+#select out variable wanted
+data <- subset(training.data.raw,select=c(2,3,5,6,7,8,10,12))
+
+#replace missing with mean
+data$Age[is.na(data$Age)] <- mean(data$Age,na.rm=T)
+
+#start to make model, divide train or test set
+train <- data[1:800,]
+test <- data[801:889,]
+model <- glm(Survived ~.,family=binomial(link='logit'),data=train)
+summary(model)
+
+#look table of deviance
+anova(model, test="Chisq")
+
+#r square
+library(pscl)
+pR2(model)
+
+#model prediction
+fitted.results <- predict(model,newdata=subset(test,select=c(2,3,4,5,6,7,8)),type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+
+misClasificError <- mean(fitted.results != test$Survived)
+print(paste('Accuracy',1-misClasificError))
+
+#plot ROC curve and AUC value
+library(ROCR)
+p <- predict(model, newdata=subset(test,select=c(2,3,4,5,6,7,8)), type="response")
+pr <- prediction(p, test$Survived)
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf)
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
