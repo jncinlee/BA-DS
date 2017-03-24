@@ -24,7 +24,7 @@ names(jim)
 [31] "hnd_webcap"       "truck"            "mtrcycle"         "rv"               "occu1"           
 [36] "ownrent"
 
-#run category correlation CramerV > 0.03 which is below
+#run category correlation CramerV > 0.03 which is below features
 "csa"
 "area"
 "dualband"
